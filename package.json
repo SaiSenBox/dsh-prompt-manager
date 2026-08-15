@@ -1,0 +1,71 @@
+{
+  "name": "dsh-prompt-manager",
+  "version": "1.4.1",
+  "description": "A local, bilingual prompt library with session-level system prompt injection for DeepSeek Harness Web.",
+  "private": false,
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "author": "SaiSenBox",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SaiSenBox/dsh-prompt-manager.git"
+  },
+  "homepage": "https://github.com/SaiSenBox/dsh-prompt-manager#readme",
+  "bugs": {
+    "url": "https://github.com/SaiSenBox/dsh-prompt-manager/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "prompt-manager",
+    "prompt-library"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "check": "node --check lib/index.js && node --check lib/client.js",
+    "test": "node --test",
+    "pack:check": "npm pack --dry-run"
+  },
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "install.ps1",
+    "uninstall.ps1",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

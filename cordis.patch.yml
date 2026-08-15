@@ -1,0 +1,4 @@
+# Register Prompt Manager's Host runtime and Web client in the DSH Web profile.
+- insert:
+    - id: prompt-manager
+      name: dsh-prompt-manager
