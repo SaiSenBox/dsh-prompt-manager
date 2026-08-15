@@ -6,6 +6,16 @@ A small personal prompt library for DeepSeek Harness Web.
 
 I kept rewriting the same instructions across conversations—how to review code, what tests should cover, or how a weekly update should be structured. Keeping them in a separate notes app worked, but broke the flow. This plugin keeps those prompts inside DSH and makes them available with a quick `/prompt`.
 
+## Screenshots
+
+Organize, search, and back up prompts from Settings:
+
+![Prompt library](./assets/prompt-library.png)
+
+Search and select the prompts used by the current session directly from the composer:
+
+![Prompt picker in the chat composer](./assets/composer-picker.png)
+
 ## What it does
 
 - Create, edit, delete, and search prompts from **Settings → Prompt Manager**.
