@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 
@@ -8,6 +11,7 @@ import {
   escapePromptVariables,
   isLoopbackAddress,
   normalizeActivation,
+  normalizeLibraryPrompts,
   normalizeStoredPrompts,
   renderInjectedPrompt,
   resolveActivePrompt,
@@ -135,4 +139,79 @@ test("host routes add several prompts and remove one without clearing the rest",
 	assert.deepEqual(removed.body.prompts.map((prompt) => prompt.id), ["tests"]);
 	const state = await request("/prompt-manager/session?sessionId=session-1");
 	assert.deepEqual(state.body.prompts.map((prompt) => prompt.id), ["tests"]);
+});
+
+test("library normalization keeps tags, favorites, and usage while deduplicating", () => {
+	const prompts = normalizeLibraryPrompts([
+		{ id: "one", title: "Review", content: "Check it", tags: ["Dev", "dev", "  "], favorite: true, useCount: 3, lastUsedAt: 42 },
+		{ id: "two", title: "Tests", content: "Add tests", tags: ["test"] },
+		{ id: "one", title: "Duplicate id", content: "Ignored" },
+		null,
+		{ id: "three", title: "Missing content" },
+		{ id: "four", title: "No tags", content: "Body", tags: "not-an-array" }
+	]);
+	assert.deepEqual(Array.from(prompts, (prompt) => prompt.id), ["one", "two", "four"]);
+	assert.deepEqual(Array.from(prompts[0].tags), ["Dev"]);
+	assert.equal(prompts[0].favorite, true);
+	assert.equal(prompts[0].useCount, 3);
+	assert.equal(prompts[0].lastUsedAt, 42);
+	assert.deepEqual(prompts[2].tags, []);
+});
+
+test("library route persists prompts to a durable file and reads them back", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "dsh-prompt-manager-"));
+	const previous = process.env.DSH_PROMPT_MANAGER_DATA_DIR;
+	process.env.DSH_PROMPT_MANAGER_DATA_DIR = directory;
+	try {
+		let route;
+		const ctx = {
+			sessions: new Map(),
+			emit() {},
+			effect(setup) { return setup(); },
+			systemPrompt: { section() { return () => {}; } },
+			webServer: { register(options) { route = options.handler; return () => {}; } }
+		};
+		apply(ctx);
+
+		async function request(path, body) {
+			const req = Readable.from(body === undefined ? [] : [JSON.stringify(body)]);
+			Object.assign(req, {
+				method: body === undefined ? "GET" : "POST",
+				url: path,
+				socket: { remoteAddress: "127.0.0.1" },
+				headers: { "content-type": "application/json", host: "127.0.0.1:3080" }
+			});
+			let status = 0;
+			let responseBody = "";
+			const res = {
+				writableEnded: false,
+				writeHead(value) { status = value; },
+				end(value = "") { responseBody += value; this.writableEnded = true; }
+			};
+			await route(req, res);
+			return { status, body: responseBody ? JSON.parse(responseBody) : null };
+		}
+
+		const posted = await request("/prompt-manager/library", {
+			prompts: [
+				{ id: "one", title: "Review", content: "Check it", tags: ["dev"], favorite: true },
+				{ id: "two", title: "Tests", content: "Add tests" }
+			]
+		});
+		assert.equal(posted.status, 200);
+		assert.deepEqual(posted.body.prompts.map((prompt) => prompt.id), ["one", "two"]);
+
+		const read = await request("/prompt-manager/library");
+		assert.equal(read.status, 200);
+		assert.deepEqual(read.body.prompts.map((prompt) => prompt.id), ["one", "two"]);
+		assert.equal(read.body.prompts[0].favorite, true);
+
+		const cleared = await request("/prompt-manager/library", { prompts: [] });
+		assert.equal(cleared.status, 200);
+		assert.deepEqual(cleared.body.prompts, []);
+		assert.deepEqual((await request("/prompt-manager/library")).body.prompts, []);
+	} finally {
+		process.env.DSH_PROMPT_MANAGER_DATA_DIR = previous;
+		await rm(directory, { recursive: true, force: true });
+	}
 });
