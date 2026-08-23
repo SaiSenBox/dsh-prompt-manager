@@ -67,7 +67,11 @@ Prompts are stored in browser `localStorage` under `dsh-prompt-manager.prompts`,
 - **Merge** keeps local entries and lets matching IDs from the backup win;
 - **Replace** replaces the whole library with the backup.
 
-The system-prompt section itself lives only in the current DSH process. After a DSH restart, the Web client restores it for sessions that still exist using browser-local state. A fork inherits the nearest ancestor prompt set but can add or remove individual prompts locally. By default, only the local machine's Web UI can change injection state.
+The browser and durable mirror synchronize through ordered revisions, so rapid edits cannot let an older request overwrite newer content. If two pages modify the library concurrently, their entries are merged and the UI asks you to review the result. An empty library is a valid state and does not recreate the examples after restart.
+
+Durable writes use a same-directory temporary file and atomic replacement, with owner-only permissions where the platform supports them. A corrupt file is never silently overwritten; after the next explicit edit or valid import it is first retained as `prompts.json.corrupt-*`. Read and sync failures are shown in Prompt Manager.
+
+The system-prompt section itself lives only in the current DSH process. After a DSH restart, the Web client restores it for sessions that still exist using browser-local state. A fork inherits the nearest ancestor prompt set but can add or remove individual prompts locally. By default, only the local machine's Web UI can read or modify prompts and injection state; remote management requires explicitly setting `DSH_PROMPT_MANAGER_ALLOW_REMOTE=1`.
 
 Imported and stored data are validated. If data is damaged or the browser refuses a write, the UI reports it instead of silently claiming success.
 

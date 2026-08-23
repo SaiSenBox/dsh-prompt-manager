@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -7,6 +7,7 @@ import test from "node:test";
 
 import {
   apply,
+  assertLocalReadRequest,
   assertMutationRequest,
   escapePromptVariables,
   isLoopbackAddress,
@@ -37,6 +38,12 @@ test("mutation requests are JSON, same-origin, and loopback by default", () => {
   assert.throws(() => assertMutationRequest(mutationRequest("192.168.1.12")), /remote prompt mutation is disabled/);
   assert.throws(() => assertMutationRequest(mutationRequest("127.0.0.1", { "content-type": "text/plain" })), /application\/json/);
   assert.throws(() => assertMutationRequest(mutationRequest("127.0.0.1", { origin: "http://example.com" })), /origin does not match/);
+});
+
+test("library reads are loopback and same-origin by default", () => {
+	assert.doesNotThrow(() => assertLocalReadRequest(mutationRequest()));
+	assert.throws(() => assertLocalReadRequest(mutationRequest("192.168.1.12")), /remote prompt reads are disabled/);
+	assert.throws(() => assertLocalReadRequest(mutationRequest("127.0.0.1", { origin: "http://example.com" })), /origin does not match/);
 });
 
 test("activation input is normalized without retaining extra fields", () => {
@@ -158,7 +165,7 @@ test("library normalization keeps tags, favorites, and usage while deduplicating
 	assert.deepEqual(prompts[2].tags, []);
 });
 
-test("library route persists prompts to a durable file and reads them back", async () => {
+test("library route preserves an intentionally empty library with revisions and private files", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "dsh-prompt-manager-"));
 	const previous = process.env.DSH_PROMPT_MANAGER_DATA_DIR;
 	process.env.DSH_PROMPT_MANAGER_DATA_DIR = directory;
@@ -173,13 +180,13 @@ test("library route persists prompts to a durable file and reads them back", asy
 		};
 		apply(ctx);
 
-		async function request(path, body) {
+		async function request(path, body, options = {}) {
 			const req = Readable.from(body === undefined ? [] : [JSON.stringify(body)]);
 			Object.assign(req, {
 				method: body === undefined ? "GET" : "POST",
 				url: path,
-				socket: { remoteAddress: "127.0.0.1" },
-				headers: { "content-type": "application/json", host: "127.0.0.1:3080" }
+				socket: { remoteAddress: options.address || "127.0.0.1" },
+				headers: Object.assign({ "content-type": "application/json", host: "127.0.0.1:3080" }, options.headers)
 			});
 			let status = 0;
 			let responseBody = "";
@@ -192,7 +199,14 @@ test("library route persists prompts to a durable file and reads them back", asy
 			return { status, body: responseBody ? JSON.parse(responseBody) : null };
 		}
 
+		const missing = await request("/prompt-manager/library");
+		assert.equal(missing.status, 200);
+		assert.equal(missing.body.exists, false);
+		assert.equal(missing.body.corrupt, false);
+		assert.equal(missing.body.revision, 0);
+
 		const posted = await request("/prompt-manager/library", {
+			baseRevision: 0,
 			prompts: [
 				{ id: "one", title: "Review", content: "Check it", tags: ["dev"], favorite: true },
 				{ id: "two", title: "Tests", content: "Add tests" }
@@ -200,18 +214,129 @@ test("library route persists prompts to a durable file and reads them back", asy
 		});
 		assert.equal(posted.status, 200);
 		assert.deepEqual(posted.body.prompts.map((prompt) => prompt.id), ["one", "two"]);
+		assert.equal(posted.body.revision, 1);
 
 		const read = await request("/prompt-manager/library");
 		assert.equal(read.status, 200);
 		assert.deepEqual(read.body.prompts.map((prompt) => prompt.id), ["one", "two"]);
 		assert.equal(read.body.prompts[0].favorite, true);
+		assert.equal(read.body.exists, true);
+		assert.equal(read.body.corrupt, false);
 
-		const cleared = await request("/prompt-manager/library", { prompts: [] });
+		const cleared = await request("/prompt-manager/library", { baseRevision: 1, prompts: [] });
 		assert.equal(cleared.status, 200);
+		assert.equal(cleared.body.revision, 2);
 		assert.deepEqual(cleared.body.prompts, []);
-		assert.deepEqual((await request("/prompt-manager/library")).body.prompts, []);
+		const empty = await request("/prompt-manager/library");
+		assert.equal(empty.body.exists, true);
+		assert.equal(empty.body.revision, 2);
+		assert.deepEqual(empty.body.prompts, []);
+
+		const remoteRead = await request("/prompt-manager/library", undefined, { address: "192.168.1.12" });
+		assert.equal(remoteRead.status, 403);
+		assert.match(remoteRead.body.error, /remote prompt reads are disabled/);
+
+		assert.deepEqual(await readdir(directory), ["prompts.json"]);
+		if (process.platform !== "win32") {
+			assert.equal((await stat(directory)).mode & 0o777, 0o700);
+			assert.equal((await stat(join(directory, "prompts.json"))).mode & 0o777, 0o600);
+		}
 	} finally {
-		process.env.DSH_PROMPT_MANAGER_DATA_DIR = previous;
+		if (previous === undefined) delete process.env.DSH_PROMPT_MANAGER_DATA_DIR;
+		else process.env.DSH_PROMPT_MANAGER_DATA_DIR = previous;
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("corrupt durable files are preserved until an explicit repair write", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "dsh-prompt-manager-corrupt-"));
+	const previous = process.env.DSH_PROMPT_MANAGER_DATA_DIR;
+	process.env.DSH_PROMPT_MANAGER_DATA_DIR = directory;
+	const file = join(directory, "prompts.json");
+	try {
+		await writeFile(file, "{broken json", "utf8");
+		let route;
+		apply({
+			sessions: new Map(), emit() {}, effect(setup) { return setup(); },
+			systemPrompt: { section() { return () => {}; } },
+			webServer: { register(options) { route = options.handler; return () => {}; } }
+		});
+		async function request(body) {
+			const req = Readable.from(body === undefined ? [] : [JSON.stringify(body)]);
+			Object.assign(req, {
+				method: body === undefined ? "GET" : "POST", url: "/prompt-manager/library",
+				socket: { remoteAddress: "127.0.0.1" },
+				headers: { "content-type": "application/json", host: "127.0.0.1:3080" }
+			});
+			let status = 0, responseBody = "";
+			const res = { writableEnded: false, writeHead(value) { status = value; }, end(value = "") { responseBody += value; this.writableEnded = true; } };
+			await route(req, res);
+			return { status, body: responseBody ? JSON.parse(responseBody) : null };
+		}
+
+		const corrupt = await request();
+		assert.equal(corrupt.body.exists, true);
+		assert.equal(corrupt.body.corrupt, true);
+		const rejected = await request({ baseRevision: 0, prompts: [] });
+		assert.equal(rejected.status, 409);
+		assert.equal(rejected.body.code, "library_corrupt");
+		assert.equal(await readFile(file, "utf8"), "{broken json");
+
+		const repaired = await request({
+			baseRevision: 0,
+			replaceCorrupt: true,
+			prompts: [{ id: "safe", title: "Recovered", content: "Keep this" }]
+		});
+		assert.equal(repaired.status, 200);
+		assert.equal(repaired.body.revision, 1);
+		const names = await readdir(directory);
+		assert.ok(names.some((name) => name.startsWith("prompts.json.corrupt-")));
+		assert.deepEqual(JSON.parse(await readFile(file, "utf8")).prompts.map((prompt) => prompt.id), ["safe"]);
+	} finally {
+		if (previous === undefined) delete process.env.DSH_PROMPT_MANAGER_DATA_DIR;
+		else process.env.DSH_PROMPT_MANAGER_DATA_DIR = previous;
+		await rm(directory, { recursive: true, force: true });
+	}
+});
+
+test("concurrent writes use revision conflicts instead of overwriting a newer snapshot", async () => {
+	const directory = await mkdtemp(join(tmpdir(), "dsh-prompt-manager-race-"));
+	const previous = process.env.DSH_PROMPT_MANAGER_DATA_DIR;
+	process.env.DSH_PROMPT_MANAGER_DATA_DIR = directory;
+	try {
+		let route;
+		apply({
+			sessions: new Map(), emit() {}, effect(setup) { return setup(); },
+			systemPrompt: { section() { return () => {}; } },
+			webServer: { register(options) { route = options.handler; return () => {}; } }
+		});
+		async function post(body) {
+			const req = Readable.from([JSON.stringify(body)]);
+			Object.assign(req, {
+				method: "POST", url: "/prompt-manager/library", socket: { remoteAddress: "127.0.0.1" },
+				headers: { "content-type": "application/json", host: "127.0.0.1:3080" }
+			});
+			let status = 0, responseBody = "";
+			const res = { writableEnded: false, writeHead(value) { status = value; }, end(value = "") { responseBody += value; this.writableEnded = true; } };
+			await route(req, res);
+			return { status, body: JSON.parse(responseBody) };
+		}
+
+		assert.equal((await post({ baseRevision: 0, prompts: [] })).status, 200);
+		const writes = await Promise.all([
+			post({ baseRevision: 1, prompts: [{ id: "one", title: "One", content: "First" }] }),
+			post({ baseRevision: 1, prompts: [{ id: "two", title: "Two", content: "Second" }] })
+		]);
+		assert.deepEqual(writes.map((result) => result.status).sort(), [200, 409]);
+		const winner = writes.find((result) => result.status === 200);
+		const conflict = writes.find((result) => result.status === 409);
+		assert.equal(conflict.body.code, "revision_conflict");
+		assert.equal(conflict.body.revision, 2);
+		assert.deepEqual(JSON.parse(await readFile(join(directory, "prompts.json"), "utf8")).prompts, winner.body.prompts);
+		assert.deepEqual(await readdir(directory), ["prompts.json"]);
+	} finally {
+		if (previous === undefined) delete process.env.DSH_PROMPT_MANAGER_DATA_DIR;
+		else process.env.DSH_PROMPT_MANAGER_DATA_DIR = previous;
 		await rm(directory, { recursive: true, force: true });
 	}
 });

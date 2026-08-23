@@ -1,9 +1,12 @@
 # Changelog
 
-## 1.5.0 - 2026-08-16
+## 1.5.0 - 2026-08-23
 
 - Fixed user-added prompts being reset to the four seed prompts after a DSH restart. The desktop app serves the Web UI on a fresh port each launch, which isolates browser `localStorage` by origin; the prompt library is now mirrored to a durable local file (`$DSH_HOME/dsh-prompt-manager/prompts.json`) and restored from it when the browser copy is missing.
 - Fixed the primary "新建"/"New" button blending text into its background in both light and dark themes. It now uses the DSH button fill and foreground tokens instead of the non-inverting `brand-primary-invert` token, and the picker check mark follows the same fix.
+- Preserved intentionally empty libraries, kept hydration read-only until the host copy is known, and added revision-based conflict handling with serialized client writes.
+- Made host persistence private and crash-safe with owner-only permissions, a serialized mutation queue, and same-directory atomic replacement. Corrupt files are retained as `prompts.json.corrupt-*` before an explicit repair write.
+- Restricted prompt-library and active-session reads to the local machine by default, matching the existing mutation policy.
 
 ## 1.4.1 - 2026-08-15
 
