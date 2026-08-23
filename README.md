@@ -25,7 +25,7 @@
 - 启用后按钮会直接显示提示词名称；从当前会话新建的分支会继承提示词，并显示相同状态。
 - 把提示词库导出为 JSON 备份，也可以用“合并”或“替换”方式导入。
 - 跟随 DSH 的语言设置切换中文或英文。
-- 数据只保存在当前浏览器，不会由插件上传到网络。
+- 数据只保存在本机（浏览器与本地镜像文件），不会由插件上传到网络。
 
 首次使用会放入 4 条示例提示词，随时可以改掉或删除。
 
@@ -59,10 +59,13 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ## 备份与隐私
 
-提示词默认保存在浏览器 `localStorage` 的 `dsh-prompt-manager.prompts` 键中；每个会话当前启用的提示词集合保存在 `dsh-prompt-manager.session-injections` 中。因此：
+提示词默认保存在浏览器 `localStorage` 的 `dsh-prompt-manager.prompts` 键中，并镜像到本机
+`$DSH_HOME/dsh-prompt-manager/prompts.json`（可用环境变量 `DSH_PROMPT_MANAGER_DATA_DIR` 更改目录）；
+每个会话当前启用的提示词集合保存在 `dsh-prompt-manager.session-injections` 中。因此：
 
 - 同一浏览器的多个标签页会同步；
-- 换浏览器、清理站点数据或更换访问地址前，建议先点“导出”；
+- DSH 桌面应用每次启动可能使用新端口（浏览器 `localStorage` 按端口隔离），此时提示词库会从本机镜像文件自动恢复，不再因重启而丢失；
+- 换浏览器或清理站点数据前，建议先点“导出”；
 - 导入“合并”会保留现有条目，同 ID 的备份条目会覆盖旧条目；
 - 导入“替换”会用备份完整替换当前提示词库。
 

@@ -25,7 +25,7 @@ Search and select the prompts used by the current session directly from the comp
 - Once active, the control shows the prompt name. Branches created from that session inherit the prompt and show the same state.
 - Export the library as a JSON backup, then import it by merging or replacing.
 - Follow DSH's Chinese or English language setting.
-- Keep all prompt data in the current browser. The plugin does not upload it.
+- Keep all prompt data on this machine (the browser plus a local mirror file). The plugin does not upload it.
 
 Four editable examples are included on first use.
 
@@ -59,10 +59,11 @@ Use `Ctrl + Enter` (`⌘ + Enter` on macOS) to save while editing.
 
 ## Backups and privacy
 
-Prompts are stored in browser `localStorage` under `dsh-prompt-manager.prompts`. Active per-session prompt sets are stored under `dsh-prompt-manager.session-injections`. That means:
+Prompts are stored in browser `localStorage` under `dsh-prompt-manager.prompts`, and mirrored to `$DSH_HOME/dsh-prompt-manager/prompts.json` (relocatable with the `DSH_PROMPT_MANAGER_DATA_DIR` environment variable). Active per-session prompt sets are stored under `dsh-prompt-manager.session-injections`. That means:
 
 - tabs in the same browser stay in sync;
-- exporting is recommended before clearing site data, changing browsers, or switching the address used to open DSH;
+- DSH Desktop may serve the Web UI on a new port each launch (browser `localStorage` is isolated per port), so the library is restored from the local mirror file and no longer reset by a restart;
+- exporting is recommended before clearing site data or changing browsers;
 - **Merge** keeps local entries and lets matching IDs from the backup win;
 - **Replace** replaces the whole library with the backup.
 
