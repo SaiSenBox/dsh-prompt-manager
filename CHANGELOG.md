@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1 - 2026-09-27
+
+- Fixed a multi-tab sync loop: pages now observe another tab's library changes without posting them back to the host. Concurrent edits still merge, and identical content no longer causes repeated revision conflicts or a flashing conflict notice.
+
 ## 1.5.0 - 2026-08-23
 
 - Fixed user-added prompts being reset to the four seed prompts after a DSH restart. The desktop app serves the Web UI on a fresh port each launch, which isolates browser `localStorage` by origin; the prompt library is now mirrored to a durable local file (`$DSH_HOME/dsh-prompt-manager/prompts.json`) and restored from it when the browser copy is missing.

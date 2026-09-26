@@ -283,3 +283,103 @@ test("client mirror coalesces rapid mutations and advances the host revision in 
 	assert.equal(isolated.storeSnapshot().dirty, false);
 	assert.deepEqual(Array.from(isolated.storeSnapshot().prompts, (prompt) => prompt.id), ["one", "two"]);
 });
+
+function sharedLibraryTabs(initialPrompts = []) {
+	const values = new Map();
+	const tabs = [];
+	const host = { revision: 1, prompts: initialPrompts };
+	let deliverEvents = false;
+	let posts = 0;
+	const postTrace = [];
+	function response(ok, status, payload) {
+		return { ok, status, json() { return Promise.resolve(payload); } };
+	}
+	function payload() {
+		return { ok: true, exists: true, corrupt: false, revision: host.revision, prompts: host.prompts };
+	}
+	function openTab() {
+		let tab;
+		tab = loadCore({
+			localStorage: {
+				getItem(key) { return values.has(key) ? values.get(key) : null; },
+				setItem(key, value) {
+					values.set(key, value);
+					if (deliverEvents && key === "dsh-prompt-manager.prompts") {
+						for (const other of tabs) {
+							if (other !== tab) queueMicrotask(() => other.reloadFromStorage());
+						}
+					}
+				}
+			},
+			fetch(path, options) {
+				assert.equal(path, "/prompt-manager/library");
+				if (options.method === "GET") return Promise.resolve(response(true, 200, payload()));
+				posts++;
+				const body = JSON.parse(options.body);
+				postTrace.push({ base: body.baseRevision, ids: body.prompts.map((prompt) => prompt.id) });
+				if (body.baseRevision !== host.revision) {
+					return Promise.resolve(response(false, 409, { ...payload(), ok: false, code: "revision_conflict" }));
+				}
+				host.revision++;
+				host.prompts = body.prompts;
+				return Promise.resolve(response(true, 200, payload()));
+			}
+		});
+		tabs.push(tab);
+		return tab;
+	}
+	return {
+		openTab,
+		startEvents() { deliverEvents = true; },
+		get posts() { return posts; },
+		get postTrace() { return postTrace; },
+		get host() { return host; }
+	};
+}
+
+async function settleTabs(tabs) {
+	for (let i = 0; i < 12; i++) {
+		await Promise.all(tabs.map((tab) => tab.waitForLibrarySync()));
+		await new Promise((resolve) => setImmediate(resolve));
+	}
+}
+
+test("other tabs observe a prompt edit without echoing it back to the host", async () => {
+	const original = { id: "one", title: "One", content: "Original", tags: [], updatedAt: 1, favorite: false, useCount: 0, lastUsedAt: 0 };
+	const shared = sharedLibraryTabs([original]);
+	const first = shared.openTab();
+	const second = shared.openTab();
+	const third = shared.openTab();
+	await Promise.all([first.initializeStore(), second.initializeStore(), third.initializeStore()]);
+	shared.startEvents();
+
+	first.persistPrompts([{ ...original, content: "Updated", updatedAt: 2 }]);
+	await settleTabs([first, second, third]);
+	assert.equal(shared.posts, 1);
+	assert.deepEqual(Array.from(shared.host.prompts, (prompt) => prompt.id), ["one"]);
+	for (const tab of [first, second, third]) {
+		assert.deepEqual(Array.from(tab.storeSnapshot().prompts, (prompt) => prompt.id), ["one"]);
+		assert.equal(tab.storeSnapshot().prompts[0].content, "Updated");
+		assert.equal(tab.storeSnapshot().dirty, false);
+		assert.equal(tab.storeSnapshot().syncError, "");
+	}
+});
+
+test("concurrent edits in two tabs converge without a storage-event write loop", async () => {
+	const shared = sharedLibraryTabs();
+	const first = shared.openTab();
+	const second = shared.openTab();
+	await Promise.all([first.initializeStore(), second.initializeStore()]);
+	shared.startEvents();
+
+	first.persistPrompts([{ id: "one", title: "One", content: "First" }]);
+	second.persistPrompts([{ id: "two", title: "Two", content: "Second" }]);
+	await settleTabs([first, second]);
+	assert.ok(shared.posts <= 5, `expected a finite number of host writes, got ${shared.posts}: ${JSON.stringify(shared.postTrace)}`);
+	assert.deepEqual(Array.from(shared.host.prompts, (prompt) => prompt.id).sort(), ["one", "two"]);
+	for (const tab of [first, second]) {
+		assert.deepEqual(Array.from(tab.storeSnapshot().prompts, (prompt) => prompt.id).sort(), ["one", "two"]);
+		assert.equal(tab.storeSnapshot().dirty, false);
+		assert.equal(tab.storeSnapshot().syncError, "");
+	}
+});
