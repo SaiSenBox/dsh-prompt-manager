@@ -38,6 +38,12 @@ function loadCore(windowOverrides = {}) {
 
 const core = loadCore();
 
+test("prompt picker stays inside narrow viewports", () => {
+	assert.equal(core.pickerLeftOffset(80, 320, 600), 0);
+	assert.equal(core.pickerLeftOffset(200, 316, 340), -188);
+	assert.equal(core.pickerLeftOffset(4, 200, 400), 8);
+});
+
 test("Chinese and English dictionaries stay in sync", () => {
   assert.deepEqual(Object.keys(core.messages.zh).sort(), Object.keys(core.messages.en).sort());
 });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.2 - 2026-09-27
+
+- Improved contrast in DSH 0.1.7-rc.2: search and form placeholders no longer use the barely visible dimmed label color.
+- Matched the built-in plugin inventory search field and settings card tokens, adopted the official isolated frosted menu material, and kept the composer picker inside narrow viewports without horizontal scrolling.
+
 ## 1.5.1 - 2026-09-27
 
 - Fixed a multi-tab sync loop: pages now observe another tab's library changes without posting them back to the host. Concurrent edits still merge, and identical content no longer causes repeated revision conflicts or a flashing conflict notice.
