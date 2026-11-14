@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.3 - 2026-11-15
+
+- Fixed prompt manager styles disappearing when another plugin reloads on affected DeepSeek Harness versions.
+- Kept the composer prompt picker inside the viewport when the composer layout changes.
+- Prevented prompt library cards from shrinking and hiding their previews. Longer previews show up to four lines, and scrolling over them moves the whole list.
+
 ## 1.5.2 - 2026-09-27
 
 - Improved contrast in DSH 0.1.7-rc.2: search and form placeholders no longer use the barely visible dimmed label color.
